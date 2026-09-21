@@ -1,8 +1,0 @@
-[Desktop Entry]
-Name=GitFusion
-Comment=Cliente Git desktop
-Exec=gitfusion %F
-Icon=gitfusion
-Terminal=false
-Type=Application
-Categories=Development;RevisionControl;
