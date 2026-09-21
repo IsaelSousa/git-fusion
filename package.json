@@ -1,0 +1,38 @@
+{
+  "name": "gitfusion",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "tauri": "tauri",
+    "build:bin": "tauri build --no-bundle",
+    "build:arch": "npm run build:bin && cp src-tauri/target/release/gitfusion pkg/ && cd pkg && makepkg -f",
+    "build:deb-rpm": "tauri build --bundles deb,rpm",
+    "build:appimage": "NO_STRIP=true tauri build --bundles appimage || bash scripts/appimage-fallback.sh",
+    "build:linux": "npm run build:arch && npm run build:deb-rpm && npm run build:appimage && npm run collect:release",
+    "collect:release": "mkdir -p release && cp pkg/*.pkg.tar.zst src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/rpm/*.rpm src-tauri/target/release/bundle/appimage/*.AppImage release/"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^30.1.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
