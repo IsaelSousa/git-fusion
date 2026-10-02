@@ -84,7 +84,7 @@ function DialogBody() {
                   <span className="field-row">
                     <input
                       ref={i === 0 ? first : undefined}
-                      type="text"
+                      type={f.type === "password" ? "password" : "text"}
                       value={String(values[f.name])}
                       placeholder={f.placeholder}
                       spellCheck={false}

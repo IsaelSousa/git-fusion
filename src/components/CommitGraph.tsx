@@ -17,6 +17,7 @@ import {
   stashPush,
 } from "../actions";
 import { WIP_HASH, showMenu, useStore } from "../store";
+import { useExtensions } from "../extensions/registry";
 import { branchMenuItems } from "./branchMenu";
 import type { Commit, RefLabel } from "../types";
 import type { GraphRow, Segment } from "../lib/git/graph";
@@ -94,6 +95,12 @@ interface RowProps {
   wipCount: number;
 }
 
+/** Badges registrados por extensões (ex.: status do CI). */
+function ExtBadges({ commit }: { commit: Commit }) {
+  const badges = useExtensions((s) => s.commitBadges);
+  return badges.map((b) => <b.component key={b.key} commit={commit} />);
+}
+
 const Row = memo(function Row({ c, row, index, gw, selected, isHead, wipCount }: RowProps) {
   const wip = c.hash === WIP_HASH;
 
@@ -152,9 +159,12 @@ const Row = memo(function Row({ c, row, index, gw, selected, isHead, wipCount }:
             Alterações não commitadas <span className="pill pill-mod">{wipCount}</span>
           </span>
         ) : (
-          <span className="subject" title={c.subject}>
-            {c.subject}
-          </span>
+          <>
+            <ExtBadges commit={c} />
+            <span className="subject" title={c.subject}>
+              {c.subject}
+            </span>
+          </>
         )}
       </div>
       <div className="gauthor" title={c.email ? `${c.author} <${c.email}>` : ""}>

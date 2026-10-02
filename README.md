@@ -29,6 +29,8 @@ O app não reimplementa o Git: ele executa o **`git` real do sistema**, então s
 ### Outros
 
 - Tema claro e escuro
+- Botão para abrir a pasta do projeto no gerenciador de arquivos
+- Extensões (veja abaixo), incluindo **GitHub Actions**: execuções na aba "Actions", status do CI em cada commit do grafo e na barra superior, jobs/passos, re-executar e cancelar
 - Atualização automática ao voltar para a janela
 
 ## Início rápido
@@ -59,7 +61,7 @@ gitfusion [pasta-do-repositório]
 
 ## Arquitetura
 
-O núcleo Rust é propositalmente mínimo (`src-tauri/src/lib.rs`). Ele só faz três coisas: executa o `git` (`run_git`), verifica se caminhos existem (`path_exists`) e lê o argumento de linha de comando (`startup_path`). **Toda a lógica é TypeScript.**
+O núcleo Rust é propositalmente mínimo (`src-tauri/src/lib.rs`). Ele executa o `git` (`run_git`), verifica se caminhos existem (`path_exists`), lê o argumento de linha de comando (`startup_path`), abre pastas e URLs no sistema (`open_path`, `open_url`) e atende as extensões: HTTPS para uma lista fixa de hosts (`http_request`) e o token do GitHub (`github_auth_status`, `github_token_set`). **Toda a lógica é TypeScript.**
 
 ```
 src/
@@ -69,6 +71,11 @@ src/
 │   ├── patch.ts      monta patches parciais (hunk/linhas) para `git apply`
 │   ├── queries.ts    argumentos das consultas
 │   └── runner.ts     ponte com o Rust + Command Log
+├── extensions/
+│   ├── api.ts        contrato das extensões (Extension, ExtContext)
+│   ├── registry.ts   ativação, eventos e contribuições de UI
+│   ├── index.ts      extensões que acompanham o app
+│   └── github-actions/
 ├── actions.ts        operações de alto nível (refresh, commit, merge, …)
 ├── store.ts          estado global (zustand): diálogos, toasts, menus
 └── components/       UI (grafo, sidebar, diff, console, dashboard, …)
@@ -76,10 +83,34 @@ src/
 src-tauri/            núcleo Rust + configuração do Tauri
 tests/
 ├── git.test.ts       parsers, grafo e staging parcial contra um repositório git real
+├── extensions.test.ts  partes puras da extensão GitHub Actions
 └── app.test.tsx      testes da interface (jsdom) com o Tauri simulado sobre o git real
 pkg/                  PKGBUILD e arquivos do pacote Arch
 scripts/              utilitários de build (fallback do AppImage)
 ```
+
+## Extensões
+
+Extensões são módulos TypeScript em `src/extensions/` listados em `BUILTIN_EXTENSIONS`. Elas são ligadas e desligadas no ícone de quebra-cabeça da barra de abas. Uma extensão implementa `Extension` (`src/extensions/api.ts`) e, em `activate(ctx)`, registra o que quiser:
+
+```ts
+export const minhaExtensao: Extension = {
+  id: "minha-extensao",
+  name: "Minha extensão",
+  description: "…",
+  hosts: ["api.github.com"],            // o que ctx.http pode acessar
+  activate(ctx) {
+    ctx.ui.dockTab({ id: "aba", label: "Minha aba", component: MinhaAba });
+    ctx.ui.toolbarItem({ id: "botao", label: "Meu botão", component: MeuBotao });
+    ctx.ui.commitBadge(MeuBadge);       // recebe { commit }
+    ctx.on("repoChanged", recarregar);  // também: "refreshed"
+  },
+};
+```
+
+Tudo o que é registrado é desfeito ao desativar. O `ctx` também oferece `git(...)` no repositório ativo, `storage`, `toast`, `ask` (diálogos), `openUrl`, `showDockTab` e `revealCommit`.
+
+**Segurança:** o webview não acessa a rede (CSP). O `http_request` do núcleo só aceita HTTPS para hosts fixos no Rust (`ALLOWED_HOSTS`, hoje só `api.github.com`), e `ctx.http` restringe ainda aos `hosts` da extensão. O token do GitHub nunca chega ao frontend: o núcleo o injeta nas chamadas para `api.github.com`. A ordem de busca é o token salvo no chaveiro do sistema, `gh auth token` e `GH_TOKEN`/`GITHUB_TOKEN`. Sem token, só repositórios públicos funcionam, com o limite baixo da API.
 
 ## Desenvolvimento
 
@@ -88,7 +119,7 @@ scripts/              utilitários de build (fallback do AppImage)
 - Node 20+
 - Rust (via [rustup](https://rustup.rs))
 - `git` no PATH
-- Linux: `webkit2gtk-4.1`, `gtk3`, `librsvg`, `patchelf`, `base-devel`
+- Linux: `webkit2gtk-4.1`, `gtk3`, `librsvg`, `patchelf`, `base-devel`, `dbus` (chaveiro do sistema via Secret Service)
 
 ### Comandos
 

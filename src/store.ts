@@ -57,7 +57,7 @@ export type FieldValue = string | boolean;
 export interface FieldDef {
   name: string;
   label: string;
-  type: "text" | "textarea" | "checkbox" | "select" | "folder";
+  type: "text" | "password" | "textarea" | "checkbox" | "select" | "folder";
   value?: FieldValue;
   placeholder?: string;
   options?: { value: string; label: string }[];
@@ -87,6 +87,7 @@ export const TOOLBAR_LABELS: Record<string, string> = {
   search: "Busca de commits",
   filter: "Filtros do histórico",
   refresh: "Atualizar",
+  folder: "Abrir pasta do projeto",
   sep1: "Separador 1",
   sep2: "Separador 2",
   spacer: "Espaço flexível",
@@ -100,15 +101,18 @@ export interface ToolbarConfig {
 }
 
 export const DEFAULT_TOOLBAR: ToolbarConfig = {
-  order: ["fetch", "pull", "push", "sep1", "branch", "stash", "pop", "sep2", "spacer", "search", "filter", "refresh"],
+  order: ["fetch", "pull", "push", "sep1", "branch", "stash", "pop", "sep2", "spacer", "search", "filter", "folder", "refresh"],
   hidden: [],
   labels: true,
 };
 
+/** Itens de extensões (`ext:<extensão>:<item>`) são mantidos mesmo que a extensão ainda não tenha carregado. */
+export const isExtToolbarId = (id: string) => id.startsWith("ext:");
+
 /** Descarta ids desconhecidos e acrescenta itens novos que a config salva ainda não conhece. */
 function loadToolbar(): ToolbarConfig {
   const saved = load<Partial<ToolbarConfig>>("toolbar", {});
-  const known = new Set(DEFAULT_TOOLBAR.order);
+  const known = { has: (id: string) => DEFAULT_TOOLBAR.order.includes(id) || isExtToolbarId(id) };
   const order = (saved.order ?? []).filter((id, i, a) => known.has(id) && a.indexOf(id) === i);
   for (const id of DEFAULT_TOOLBAR.order) if (!order.includes(id)) order.push(id);
   return {
@@ -118,13 +122,19 @@ function loadToolbar(): ToolbarConfig {
   };
 }
 
+/** Ordem salva + itens de extensões ativas que ainda não estão nela (no fim). */
+export function mergedToolbarOrder(order: string[], extIds: string[]): string[] {
+  return [...order, ...extIds.filter((id) => !order.includes(id))];
+}
+
 export function setToolbar(patch: Partial<ToolbarConfig>) {
   const next = { ...useStore.getState().toolbar, ...patch };
   save("toolbar", next);
   useStore.setState({ toolbar: next });
 }
 
-export type DockTab = "diff" | "tree" | "console" | "log";
+/** Abas nativas ou `ext:<extensão>:<aba>`. */
+export type DockTab = "diff" | "tree" | "console" | "log" | (string & {});
 
 export const WIP_HASH = "__WIP__";
 

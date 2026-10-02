@@ -13,6 +13,9 @@ import { TabBar } from "./components/TabBar";
 import { Toasts } from "./components/Toasts";
 import { Toolbar } from "./components/Toolbar";
 import { ToolbarCustomizer } from "./components/ToolbarCustomizer";
+import { ExtensionManager } from "./components/ExtensionManager";
+import { BUILTIN_EXTENSIONS } from "./extensions";
+import { startExtensions } from "./extensions/registry";
 import { load, useStore } from "./store";
 import { startupPath } from "./lib/tauri";
 import { basename } from "./lib/util";
@@ -33,6 +36,10 @@ export default function App() {
   }, [theme]);
 
   // Abre o repositório passado na linha de comando ou reabre a última sessão.
+  useEffect(() => {
+    void startExtensions(BUILTIN_EXTENSIONS);
+  }, []);
+
   useEffect(() => {
     (async () => {
       const fromCli = await startupPath().catch(() => null);
@@ -110,6 +117,7 @@ export default function App() {
       <ContextMenu />
       <Dialog />
       <ToolbarCustomizer />
+      <ExtensionManager />
       <Toasts />
       {!active && busy && (
         <div className="statusbar floating"><span className="spinner" /> {busy}</div>

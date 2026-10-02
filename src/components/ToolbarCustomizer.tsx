@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_TOOLBAR, TOOLBAR_LABELS, setToolbar, useStore } from "../store";
+import { DEFAULT_TOOLBAR, TOOLBAR_LABELS, isExtToolbarId, mergedToolbarOrder, setToolbar, useStore } from "../store";
+import { useExtensions } from "../extensions/registry";
 import { IconGrip } from "./Icons";
 
 /** Janela para mostrar/ocultar e reordenar os itens da barra superior. */
 export function ToolbarCustomizer() {
   const open = useStore((s) => s.customizingToolbar);
   const cfg = useStore((s) => s.toolbar);
+  const extItems = useExtensions((s) => s.toolbarItems);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
@@ -20,10 +22,19 @@ export function ToolbarCustomizer() {
 
   if (!open) return null;
 
+  const labels: Record<string, string> = { ...TOOLBAR_LABELS, ...Object.fromEntries(extItems.map((x) => [x.id, x.label])) };
+  const full = mergedToolbarOrder(
+    cfg.order,
+    extItems.map((x) => x.id),
+  );
+  // Itens de extensões desativadas continuam salvos (no fim), mas não aparecem aqui.
+  const shown = full.filter((id) => !isExtToolbarId(id) || id in labels);
+  const parked = full.filter((id) => !shown.includes(id));
+
   const move = (id: string, to: number) => {
-    const order = cfg.order.filter((x) => x !== id);
+    const order = shown.filter((x) => x !== id);
     order.splice(Math.max(0, Math.min(order.length, to)), 0, id);
-    setToolbar({ order });
+    setToolbar({ order: [...order, ...parked] });
   };
   const toggle = (id: string) =>
     setToolbar({ hidden: cfg.hidden.includes(id) ? cfg.hidden.filter((x) => x !== id) : [...cfg.hidden, id] });
@@ -35,7 +46,7 @@ export function ToolbarCustomizer() {
         <p className="dialog-msg">Marque o que deve aparecer e arraste (ou use ▲▼) para reordenar. As mudanças valem na hora.</p>
 
         <div className="cust-list">
-          {cfg.order.map((id, i) => (
+          {shown.map((id, i) => (
             <div
               key={id}
               className={`cust-row${dragging === id ? " dragging" : ""}${over === id && dragging !== id ? " over" : ""}`}
@@ -63,13 +74,13 @@ export function ToolbarCustomizer() {
               <IconGrip className="ico" />
               <label className="cust-check">
                 <input type="checkbox" checked={!cfg.hidden.includes(id)} onChange={() => toggle(id)} />
-                <span className={cfg.hidden.includes(id) ? "muted" : ""}>{TOOLBAR_LABELS[id] ?? id}</span>
+                <span className={cfg.hidden.includes(id) ? "muted" : ""}>{labels[id] ?? id}</span>
               </label>
               <span className="grow-fill" />
               <button className="icon-btn" title="Mover para cima" disabled={i === 0} onClick={() => move(id, i - 1)}>
                 ▲
               </button>
-              <button className="icon-btn" title="Mover para baixo" disabled={i === cfg.order.length - 1} onClick={() => move(id, i + 1)}>
+              <button className="icon-btn" title="Mover para baixo" disabled={i === shown.length - 1} onClick={() => move(id, i + 1)}>
                 ▼
               </button>
             </div>

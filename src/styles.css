@@ -1553,3 +1553,162 @@ pre.err {
 .recent-name {
   font-weight: 600;
 }
+
+/* ------------------------------------------------------------ extensões */
+
+.ext-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ext-row:last-child {
+  border-bottom: none;
+}
+.ext-name {
+  font-weight: 600;
+}
+.ext-desc,
+.ext-hosts {
+  margin: 0;
+  font-size: 12px;
+}
+.ext-hosts {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------- extensão: GitHub Actions */
+
+.gha {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.gha-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.gha-slug {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+.gha-slug:hover,
+.gha-job-head a:hover {
+  text-decoration: underline;
+}
+.gha-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.gha-cta {
+  margin-top: 12px;
+}
+.gha-run {
+  border-bottom: 1px solid var(--border);
+}
+.gha-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.gha-run-head:hover {
+  background: var(--hover);
+}
+.gha-run.open > .gha-run-head {
+  background: var(--panel-2);
+}
+.gha-run-main {
+  flex: 1;
+  min-width: 0;
+}
+.gha-run-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 11.5px;
+}
+.gha-run-actions {
+  display: none;
+  gap: 4px;
+}
+.gha-run-head:hover .gha-run-actions,
+.gha-run.open .gha-run-actions {
+  display: inline-flex;
+}
+.gha-jobs {
+  padding: 4px 10px 10px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gha-job-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gha-job-head a {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+.gha-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 22px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.gha-light {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
+}
+.gmsg .gha-light {
+  margin-right: 6px;
+}
+.gha-success {
+  color: var(--green);
+}
+.gha-failure {
+  color: var(--red);
+}
+.gha-pending {
+  color: var(--yellow);
+  animation: gha-pulse 1.4s ease-in-out infinite;
+}
+.gha-cancelled {
+  color: var(--muted);
+}
+.gha-running {
+  background: var(--yellow);
+  color: #000;
+}
+@keyframes gha-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}

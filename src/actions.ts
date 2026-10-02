@@ -36,7 +36,7 @@ import {
   worktreeDiffArgs,
 } from "./lib/git/queries";
 import { type PatchMode, patchArgs } from "./lib/git/patch";
-import { pathExists, pickFolder } from "./lib/tauri";
+import { openPath, pathExists, pickFolder } from "./lib/tauri";
 import { copyText, short } from "./lib/util";
 import {
   EMPTY_GRAPH,
@@ -322,6 +322,16 @@ export async function copy(text: string, what = "Copiado") {
     toast("success", `${what}.`);
   } catch {
     toast("error", "Não foi possível copiar.");
+  }
+}
+
+export async function openRepoFolder() {
+  const path = S().active;
+  if (!path) return;
+  try {
+    await openPath(path);
+  } catch (e) {
+    toast("error", String(e));
   }
 }
 

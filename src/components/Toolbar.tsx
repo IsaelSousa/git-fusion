@@ -3,6 +3,7 @@ import {
   clearFilter,
   createBranch,
   fetchAll,
+  openRepoFolder,
   pull,
   push,
   refresh,
@@ -10,8 +11,9 @@ import {
   stashPop,
   stashPush,
 } from "../actions";
-import { ask, showMenu, showMenuAt, useStore } from "../store";
-import { IconBranch, IconFetch, IconFilter, IconPop, IconPull, IconPush, IconRefresh, IconSearch, IconStash } from "./Icons";
+import { ask, mergedToolbarOrder, showMenu, showMenuAt, useStore } from "../store";
+import { useExtensions } from "../extensions/registry";
+import { IconBranch, IconFetch, IconFilter, IconFolderOpen, IconPop, IconPull, IconPush, IconRefresh, IconSearch, IconStash } from "./Icons";
 
 export function Toolbar() {
   const head = useStore((s) => s.head);
@@ -19,6 +21,7 @@ export function Toolbar() {
   const busy = useStore((s) => s.busy);
   const filter = useStore((s) => s.filter);
   const cfg = useStore((s) => s.toolbar);
+  const extItems = useExtensions((s) => s.toolbarItems);
   const [text, setText] = useState(filter.text);
 
   useEffect(() => setText(filter.text), [filter.text]);
@@ -138,6 +141,11 @@ export function Toolbar() {
         )}
       </>
     ),
+    folder: () => (
+      <button className="icon-btn" title="Abrir pasta do projeto" onClick={openRepoFolder}>
+        <IconFolderOpen />
+      </button>
+    ),
     refresh: () => (
       <button className="icon-btn" title="Atualizar (F5)" onClick={refresh}>
         <IconRefresh />
@@ -147,6 +155,7 @@ export function Toolbar() {
     sep2: () => <div className="tb-sep" />,
     spacer: () => <div className="tb-spacer" />,
   };
+  for (const x of extItems) items[x.id] = () => <x.component />;
 
   return (
     <div
@@ -155,7 +164,10 @@ export function Toolbar() {
         showMenu(e, [{ label: "Personalizar barra de ferramentas…", action: () => useStore.setState({ customizingToolbar: true }) }])
       }
     >
-      {cfg.order
+      {mergedToolbarOrder(
+        cfg.order,
+        extItems.map((x) => x.id),
+      )
         .filter((id) => !cfg.hidden.includes(id) && items[id])
         .map((id) => (
           <Fragment key={id}>{items[id]()}</Fragment>

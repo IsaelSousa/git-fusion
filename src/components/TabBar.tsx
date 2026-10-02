@@ -1,7 +1,8 @@
 import { browseAndOpen, closeTab, cloneRepo, switchTab, toggleTheme } from "../actions";
 import { showMenuAt, useStore } from "../store";
+import { useExtensions } from "../extensions/registry";
 import { basename } from "../lib/util";
-import { IconClose, IconMoon, IconPlus, IconSliders, IconSun } from "./Icons";
+import { IconClose, IconMoon, IconPlus, IconPuzzle, IconSliders, IconSun } from "./Icons";
 
 export function TabBar() {
   const tabs = useStore((s) => s.tabs);
@@ -56,6 +57,9 @@ export function TabBar() {
           <IconSliders />
         </button>
       )}
+      <button className="icon-btn" title="Extensões" onClick={() => useExtensions.setState({ managing: true })}>
+        <IconPuzzle />
+      </button>
       <button className="icon-btn" title="Alternar tema" onClick={toggleTheme}>
         {theme === "dark" ? <IconSun /> : <IconMoon />}
       </button>

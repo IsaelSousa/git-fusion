@@ -8,7 +8,19 @@ import { act } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ repo: "" }));
+interface HttpCall {
+  method: string;
+  url: string;
+  headers: Record<string, string> | null;
+}
+const h = vi.hoisted(() => ({
+  repo: "",
+  http: (_c: HttpCall): { status: number; headers: Record<string, string>; body: string } => {
+    throw new Error("rede indisponível nos testes");
+  },
+  httpCalls: [] as HttpCall[],
+  opened: [] as string[],
+}));
 
 // O "Tauri" dos testes: mesmas assinaturas do núcleo Rust, mas executando o git real.
 vi.mock("@tauri-apps/api/core", () => ({
@@ -24,6 +36,13 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (cmd === "path_exists") return existsSync(join(a.cwd as string, a.rel as string));
     if (cmd === "startup_path") return h.repo;
+    if (cmd === "github_auth_status") return "gh";
+    if (cmd === "open_url") return void h.opened.push(a.url as string);
+    if (cmd === "http_request") {
+      const call = { method: a.method as string, url: a.url as string, headers: a.headers as Record<string, string> | null };
+      h.httpCalls.push(call);
+      return h.http(call);
+    }
     throw new Error("comando desconhecido: " + cmd);
   },
 }));
@@ -308,5 +327,71 @@ describe("App completo sobre um repositório real", () => {
     await click(byText(".view-bar .seg button", "Lista")!);
     await waitFor(() => !container.querySelector(".dir-row"), "modo lista de volta");
     expect(JSON.parse(localStorage.getItem("gitfusion.filesView")!)).toBe("list");
+  });
+
+  it("extensão GitHub Actions: aba, badge no grafo, jobs, re-execução e desativação", async () => {
+    const sha = g(["rev-parse", "HEAD"]).trim();
+    const subject = g(["log", "-1", "--format=%s"]).trim();
+    const branch = g(["branch", "--show-current"]).trim();
+    const base = "https://api.github.com/repos/acme/widgets/actions/runs";
+    const runs = [
+      { id: 2, name: "CI", display_title: "CI verde", run_number: 7, workflow_id: 1, head_branch: branch, head_sha: sha, event: "push",
+        status: "completed", conclusion: "success", html_url: "https://github.com/acme/widgets/actions/runs/2",
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(), actor: { login: "dev" } },
+      { id: 1, name: "CI", display_title: "Falha na feature", run_number: 6, workflow_id: 1, head_branch: "feature/x", head_sha: "f".repeat(40),
+        event: "push", status: "completed", conclusion: "failure", html_url: "https://github.com/acme/widgets/actions/runs/1",
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ];
+    h.http = ({ method, url }): ReturnType<typeof h.http> => {
+      if (method === "GET" && url.startsWith(base + "?")) return { status: 200, headers: { etag: '"v1"' }, body: JSON.stringify({ workflow_runs: runs }) };
+      if (method === "GET" && url.startsWith(base + "/2/jobs"))
+        return { status: 200, headers: {}, body: JSON.stringify({ jobs: [{ id: 9, name: "build", status: "completed", conclusion: "success",
+          html_url: "https://github.com/acme/widgets/actions/runs/2/job/9", started_at: null, completed_at: null,
+          steps: [{ number: 1, name: "npm test", status: "completed", conclusion: "success" }] }] }) };
+      if (method === "POST") return { status: 201, headers: {}, body: "" };
+      return { status: 404, headers: {}, body: "{}" };
+    };
+    g(["remote", "add", "origin", "git@github.com:acme/widgets.git"]);
+
+    await click(byText(".dock-tab", "Actions")!);
+    await waitFor(() => byText(".gha-run", "CI verde"), "execução da branch atual");
+    expect(byText(".gha-slug", "acme/widgets")).toBeTruthy();
+    expect(byText(".gha-bar .btn", "token do GitHub CLI (gh)")).toBeTruthy();
+    expect(byText(".gha-run", "Falha na feature")).toBeFalsy(); // filtrada pela branch
+    await click(byText(".gha-bar .seg button", "Todas")!);
+    await waitFor(() => byText(".gha-run", "Falha na feature"), "todas as branches");
+
+    // badge no grafo e status na barra superior
+    const row = await waitFor(() => $$(".grow").find((r) => r.textContent?.includes(subject) && r.querySelector(".gha-success")), "badge ✓ no commit");
+    expect(row).toBeTruthy();
+    expect(container.querySelector(".toolbar .tb-btn .gha-success")).not.toBeNull();
+
+    // jobs e passos
+    await click(byText(".gha-run-head", "CI verde")!);
+    await waitFor(() => byText(".gha-job", "build") && byText(".gha-step", "npm test"), "jobs da execução");
+
+    // ações
+    await click(byText(".gha-run", "Falha na feature")!.querySelector(".gha-run-actions")!.querySelector("button")!);
+    await waitFor(() => h.httpCalls.some((c) => c.method === "POST" && c.url === base + "/1/rerun-failed-jobs"), "POST rerun-failed-jobs");
+    await click(byText(".gha-run", "CI verde")!.querySelectorAll(".gha-run-actions button")[1]);
+    expect(h.opened).toContain("https://github.com/acme/widgets/actions/runs/2");
+
+    // o frontend nunca manda credenciais (o núcleo injeta) e só fala com api.github.com
+    expect(h.httpCalls.every((c) => new URL(c.url).host === "api.github.com")).toBe(true);
+    expect(h.httpCalls.every((c) => !Object.keys(c.headers ?? {}).some((k) => k.toLowerCase() === "authorization"))).toBe(true);
+    // segunda leitura usa ETag
+    await click(container.querySelector('[title="Atualizar execuções"]')!);
+    await waitFor(() => h.httpCalls.some((c) => c.headers?.["If-None-Match"] === '"v1"'), "If-None-Match na segunda leitura");
+
+    // desativar remove aba, badges e item da barra; reativar traz de volta
+    await click(container.querySelector('[title="Extensões"]')!);
+    const toggle = await waitFor(() => byText(".ext-row", "GitHub Actions")?.querySelector<HTMLInputElement>("input[type=checkbox]"), "linha da extensão");
+    await click(toggle);
+    await waitFor(() => !byText(".dock-tab", "Actions") && !container.querySelector(".gha-light"), "extensão desativada");
+    expect(container.querySelector(".dock-tab.active")?.textContent).toBe("Diff");
+    expect(JSON.parse(localStorage.getItem("gitfusion.extensions")!)).toEqual({ "github-actions": false });
+    await click(byText(".ext-row", "GitHub Actions")!.querySelector("input[type=checkbox]")!);
+    await waitFor(() => byText(".dock-tab", "Actions") && container.querySelector(".grow .gha-success"), "extensão reativada");
+    await click(byText(".dialog-actions button", "Concluído")!);
   });
 });
