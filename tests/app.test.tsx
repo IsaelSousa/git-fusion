@@ -394,4 +394,59 @@ describe("App completo sobre um repositório real", () => {
     await waitFor(() => byText(".dock-tab", "Actions") && container.querySelector(".grow .gha-success"), "extensão reativada");
     await click(byText(".dialog-actions button", "Concluído")!);
   });
+
+  it("extensão GitHub Actions: acompanha sozinha execuções novas, em andamento e seus jobs", async () => {
+    const { GHA_TIMING } = await import("../src/extensions/github-actions");
+    const defaults = { ...GHA_TIMING };
+    Object.assign(GHA_TIMING, { fast: 150, idle: 300, minInterval: 0 });
+    try {
+      const sha = g(["rev-parse", "HEAD"]).trim();
+      const branch = g(["branch", "--show-current"]).trim();
+      const now = () => new Date().toISOString();
+      let runs: object[] = [];
+      let jobsDone = false;
+      let version = 0;
+      const setRuns = (r: object[]) => {
+        runs = r;
+        version++;
+      };
+      h.http = ({ method, url, headers }): ReturnType<typeof h.http> => {
+        if (method === "GET" && url.includes("/actions/runs?")) {
+          const etag = `"v${version}"`;
+          if (headers?.["If-None-Match"] === etag) return { status: 304, headers: { etag }, body: "" };
+          return { status: 200, headers: { etag }, body: JSON.stringify({ workflow_runs: runs }) };
+        }
+        if (method === "GET" && url.includes("/runs/10/jobs")) {
+          const st = jobsDone ? { status: "completed", conclusion: "success" } : { status: "in_progress", conclusion: null };
+          return { status: 200, headers: {}, body: JSON.stringify({ jobs: [{ id: 99, name: "deploy", ...st, html_url: "https://github.com/x",
+            started_at: now(), completed_at: null, steps: [{ number: 1, name: "publicar", ...st }] }] }) };
+        }
+        return { status: 404, headers: {}, body: "{}" };
+      };
+      const run = (p: object) => ({ id: 10, name: "Deploy", display_title: "Deploy automático", run_number: 1, workflow_id: 5,
+        head_branch: branch, head_sha: sha, event: "push", html_url: "https://github.com/acme/widgets/actions/runs/10",
+        created_at: now(), updated_at: now(), run_started_at: now(), ...p });
+
+      await click(byText(".dock-tab", "Actions")!);
+      await waitFor(() => byText(".gha-list", "Nenhuma execução"), "lista vazia");
+
+      // execução disparada por fora aparece sem nenhuma ação do usuário
+      setRuns([run({ status: "in_progress", conclusion: null })]);
+      await waitFor(() => byText(".gha-run", "Deploy automático")?.querySelector(".gha-pending"), "execução em andamento surge sozinha");
+      expect(container.querySelector(".dock-tab .gha-running")?.textContent).toBe("1");
+
+      // jobs da execução aberta em andamento
+      await click(byText(".gha-run-head", "Deploy automático")!);
+      await waitFor(() => byText(".gha-step", "publicar")?.querySelector(".gha-pending"), "passo em andamento");
+
+      // termina: lista, badge, contador e jobs atualizam sozinhos
+      jobsDone = true;
+      setRuns([run({ status: "completed", conclusion: "success", updated_at: new Date(Date.now() + 1000).toISOString() })]);
+      await waitFor(() => byText(".gha-run", "Deploy automático")?.querySelector(".gha-run-head .gha-success"), "execução concluída");
+      await waitFor(() => byText(".gha-step", "publicar")?.querySelector(".gha-success"), "passo concluído");
+      await waitFor(() => !container.querySelector(".dock-tab .gha-running"), "contador zerado");
+    } finally {
+      Object.assign(GHA_TIMING, defaults);
+    }
+  });
 });

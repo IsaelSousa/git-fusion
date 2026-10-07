@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useReducer } from "react";
 import { create } from "zustand";
 import type { Commit } from "../../types";
 import { type GitHubAuth, githubAuthStatus, githubTokenSet } from "../../lib/tauri";
@@ -18,8 +18,20 @@ import {
 } from "./model";
 
 const TAB = "runs";
-const POLL_MS = 15_000;
-const MIN_INTERVAL_MS = 20_000;
+/** Intervalos de atualização (em ms). Mutável só para os testes. */
+export const GHA_TIMING = {
+  /** Com execução em andamento (ou aguardando a do último push). */
+  fast: 10_000,
+  /** Ocioso. Com token, respostas 304 (ETag) não gastam o limite da API. */
+  idle: 60_000,
+  /** Sem token o limite é 60/hora e até 304 conta: bem mais devagar. */
+  fastAnon: 30_000,
+  idleAnon: 5 * 60_000,
+  /** Por quanto tempo esperar a execução do commit recém-enviado aparecer. */
+  awaitPush: 3 * 60_000,
+  /** Refreshes do app (F5, foco na janela) mais próximos que isso são ignorados. */
+  minInterval: 5_000,
+};
 
 interface GhaState {
   path: string | null;
@@ -56,6 +68,8 @@ let etag: { path: string; value: string } | null = null;
 let lastLoad = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let loadSeq = 0;
+/** Commit enviado ao remote cuja execução ainda não apareceu. */
+let awaiting: { path: string; sha: string; since: number } | null = null;
 
 /* ------------------------------------------------------------------ API */
 
@@ -111,10 +125,11 @@ async function load(force = false) {
   if (path !== G().path) {
     stopPolling();
     etag = null;
+    awaiting = null;
     useGha.setState({ ...INITIAL, path });
   }
   if (!path) return;
-  if (!force && Date.now() - lastLoad < MIN_INTERVAL_MS) return;
+  if (!force && Date.now() - lastLoad < GHA_TIMING.minInterval) return;
   lastLoad = Date.now();
   const seq = ++loadSeq;
 
@@ -123,7 +138,7 @@ async function load(force = false) {
   if (seq !== loadSeq || ctx.repo() !== path) return;
   if (!slug) {
     stopPolling();
-    useGha.setState({ slug: null, phase: "not-github", runs: [], byCommit: new Map() });
+    useGha.setState({ slug: null, phase: "not-github", runs: [], byCommit: new Map(), jobs: {} });
     return;
   }
   const sameRepo = G().slug?.owner === slug.owner && G().slug?.repo === slug.repo;
@@ -144,7 +159,14 @@ async function load(force = false) {
     } else if (res.status === 200) {
       const runs = (JSON.parse(res.body) as { workflow_runs: WorkflowRun[] }).workflow_runs ?? [];
       etag = res.headers.etag ? { path, value: res.headers.etag } : null;
-      useGha.setState({ phase: "ready", error: null, needsAuth: false, runs, byCommit: statusByCommit(runs) });
+      useGha.setState({
+        phase: "ready",
+        error: null,
+        needsAuth: false,
+        runs,
+        byCommit: statusByCommit(runs),
+        jobs: freshJobs(G().runs, runs, G().jobs),
+      });
     } else {
       useGha.setState({ phase: "error", ...describeFailure(res.status, res.headers, res.body) });
     }
@@ -153,15 +175,51 @@ async function load(force = false) {
     useGha.setState({ phase: "error", error: e instanceof Error ? e.message : String(e), needsAuth: false });
   }
 
-  // Enquanto houver execução em andamento, acompanha de perto.
+  if (seq !== loadSeq) return;
+  // Jobs da execução aberta mudam sem mexer na lista de execuções: recarrega junto.
+  const open = G().runs.find((r) => r.id === G().expanded);
+  if (open && (open.status !== "completed" || G().jobs[open.id] === undefined)) void loadJobs(open);
+  scheduleNext(path);
+}
+
+/** Descarta jobs em cache de execuções que mudaram (terminaram, foram re-executadas…). */
+function freshJobs(prev: WorkflowRun[], next: WorkflowRun[], jobs: GhaState["jobs"]): GhaState["jobs"] {
+  const before = new Map(prev.map((r) => [r.id, `${r.updated_at}:${r.run_attempt ?? 1}`]));
+  const out: GhaState["jobs"] = {};
+  for (const r of next) {
+    const cached = jobs[r.id];
+    if (cached !== undefined && before.get(r.id) === `${r.updated_at}:${r.run_attempt ?? 1}`) out[r.id] = cached;
+  }
+  return out;
+}
+
+/**
+ * Agenda a próxima busca. Rápido enquanto há execução em andamento ou logo
+ * após um push (a execução leva alguns segundos para surgir no GitHub);
+ * devagar no resto do tempo, para pegar execuções disparadas por fora.
+ */
+function scheduleNext(path: string) {
   stopPolling();
-  if (G().runs.some((r) => r.status !== "completed")) pollTimer = setTimeout(() => void load(true), POLL_MS);
+  const s = G();
+  if (!ctx || !s.slug || s.needsAuth) return;
+
+  const head = useStore.getState().head;
+  if (head.hash && head.upstream && head.ahead === 0 && awaiting?.sha !== head.hash && !s.byCommit.has(head.hash)) {
+    awaiting = { path, sha: head.hash, since: Date.now() };
+  }
+  const waitingPush =
+    !!awaiting && awaiting.path === path && !s.byCommit.has(awaiting.sha) && Date.now() - awaiting.since < GHA_TIMING.awaitPush;
+  const running = s.runs.some((r) => r.status !== "completed");
+  const anon = s.auth === "none";
+  const t = GHA_TIMING;
+  const delay = running || waitingPush ? (anon ? t.fastAnon : t.fast) : anon ? t.idleAnon : t.idle;
+  pollTimer = setTimeout(() => void load(true), delay);
 }
 
 async function loadJobs(run: WorkflowRun) {
   const slug = G().slug;
   if (!slug) return;
-  useGha.setState((s) => ({ jobs: { ...s.jobs, [run.id]: "loading" } }));
+  if (!Array.isArray(G().jobs[run.id])) useGha.setState((s) => ({ jobs: { ...s.jobs, [run.id]: "loading" } }));
   try {
     const res = await api("GET", `/repos/${slug.owner}/${slug.repo}/actions/runs/${run.id}/jobs?per_page=100`);
     const value =
@@ -177,7 +235,7 @@ async function loadJobs(run: WorkflowRun) {
 function toggleRun(run: WorkflowRun) {
   const open = G().expanded === run.id ? null : run.id;
   useGha.setState({ expanded: open });
-  if (open !== null && (G().jobs[run.id] === undefined || run.status !== "completed")) void loadJobs(run);
+  if (open !== null && (!Array.isArray(G().jobs[run.id]) || run.status !== "completed")) void loadJobs(run);
 }
 
 async function runAction(run: WorkflowRun, kind: "rerun" | "rerun-failed-jobs" | "cancel") {
@@ -245,6 +303,16 @@ function Dot({ light, title }: { light: Light; title?: string }) {
 
 const unix = (iso: string) => Date.parse(iso) / 1000;
 
+/** Redesenha periodicamente (durações e "há X min" de execuções em andamento). */
+function useTicker(active: boolean, ms = 1000) {
+  const [, tick] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(tick, ms);
+    return () => clearInterval(t);
+  }, [active, ms]);
+}
+
 function visibleRuns(s: GhaState, branch: string | null) {
   return s.scope === "branch" && branch ? s.runs.filter((r) => r.head_branch === branch) : s.runs;
 }
@@ -287,6 +355,7 @@ function RunRow({ run }: { run: WorkflowRun }) {
   const expanded = useGha((s) => s.expanded === run.id);
   const light = lightOf(run);
   const done = run.status === "completed";
+  useTicker(!done);
   const failed = light === "failure" || light === "cancelled";
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
